@@ -27,7 +27,6 @@ if [[ -z "${TOOLS_ACCOUNT_ID}" || -z "${UAT_ACCOUNT_ID}" || -z "${PROD_ACCOUNT_I
   printf "Please set TOOLS_ACCOUNT_ID, UAT_ACCOUNT_ID, and PROD_ACCOUNT_ID"
   printf "TOOLS_ACCOUNT_ID =" ${TOOLS_ACCOUNT_ID}
   printf "UAT_ACCOUNT_ID =" ${UAT_ACCOUNT_ID}
-  printf "PROD_ACCOUNT_ID =" ${PROD_ACCOUNT_ID}
   exit
 fi
 
@@ -49,13 +48,6 @@ aws cloudformation deploy --template-file templates/CodePipelineCrossAccountRole
     --stack-name CodePipelineCrossAccountRole \
     --capabilities CAPABILITY_NAMED_IAM \
     --profile prod --parameter-overrides ToolsAccountID=${TOOLS_ACCOUNT_ID} Stage=Prod &
-    
-aws cloudformation deploy --template-file templates/CloudFormationDeploymentRole.yml \
-    --stack-name CloudFormationDeploymentRole \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --profile prod \
-    --parameter-overrides ToolsAccountID=${TOOLS_ACCOUNT_ID} Stage=Prod 
-
 
 # Deploy Repository CDK Stack 
 printf "\nDeploying Repository Stack\n"
@@ -63,7 +55,12 @@ npm install
 npm audit fix
 npm run build
 cdk synth
-cdk deploy RepositoryStack —profile pipeline
+
+export TOOLS_ACCOUNT_ID=783764580076
+export UAT_ACCOUNT_ID=825765391883
+export GitHubOwner="zjallessio2024"
+export GitHubRepo="cicd-test"
+export GitHubBranch="main"
 
 # Deploy Pipeline CDK stack, write output to a file to gather key arn
 printf "\nDeploying Cross-Account Deployment Pipeline Stack\n"
@@ -71,9 +68,11 @@ printf "\nDeploying Cross-Account Deployment Pipeline Stack\n"
 CDK_OUTPUT_FILE='.cdk_output'
 rm -rf ${CDK_OUTPUT_FILE} .cfn_outputs
 npx cdk deploy CrossAccountPipelineStack \
-  --context prod-account=${PROD_ACCOUNT_ID} \
   --context uat-account=${UAT_ACCOUNT_ID} \
-  --profile pipeline \
+  --context github-owner=${GitHubOwner} \
+  --context github-repo=${GitHubRepo} \
+  --context github-branch=${GitHubBranch} \
+  --profile zjallessio111 \
   --require-approval never \
   2>&1 | tee -a ${CDK_OUTPUT_FILE}
 sed -n -e '/Outputs:/,/^$/ p' ${CDK_OUTPUT_FILE} > .cfn_outputs
@@ -98,18 +97,6 @@ aws cloudformation deploy --template-file templates/CloudFormationDeploymentRole
     --capabilities CAPABILITY_NAMED_IAM \
     --profile uat \
     --parameter-overrides ToolsAccountID=${TOOLS_ACCOUNT_ID} Stage=Uat KeyArn=${KEY_ARN} &
-
-aws cloudformation deploy --template-file templates/CloudFormationDeploymentRole.yml \
-    --stack-name CloudFormationDeploymentRole \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --profile prod \
-    --parameter-overrides ToolsAccountID=${TOOLS_ACCOUNT_ID} Stage=Prod KeyArn=${KEY_ARN} &
-
-aws cloudformation deploy --template-file templates/CodePipelineCrossAccountRole.yml \
-    --stack-name CodePipelineCrossAccountRole \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --profile prod \
-    --parameter-overrides ToolsAccountID=${TOOLS_ACCOUNT_ID} Stage=Prod KeyArn=${KEY_ARN} 
 
 # Commit initial code to new repo (which will trigger a fresh pipeline execution)
 printf "\nCommitting code to repository\n"
